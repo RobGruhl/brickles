@@ -90,16 +90,57 @@ export function heartPath(ctx: CanvasRenderingContext2D, cx: number, cy: number,
   ctx.closePath();
 }
 
+// ── 3D extrusion ─────────────────────────────────────────────────────
+// All pieces extrude toward down-right (light stays top-left). The solid is
+// built by stamping the silhouette along the extrusion axis: ink strokes
+// first (they survive only at the rim, forming the outline of the union),
+// then shade fills back-to-front. Front face art is drawn on top at offset 0.
+
+const EX = 0.5, EY = 0.87; // extrusion direction (unit-ish vector)
+
+export function extrudePath(
+  ctx: CanvasRenderingContext2D,
+  path: (ox: number, oy: number) => void,
+  e: number,
+  shade: string,
+): void {
+  if (e < 0.75) return;
+  const steps = Math.max(2, Math.ceil(e / 3));
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = INK;
+  ctx.lineWidth = 5;
+  for (let i = steps; i >= 1; i--) {
+    const o = (e * i) / steps;
+    path(o * EX, o * EY);
+    ctx.stroke();
+  }
+  ctx.fillStyle = shade;
+  for (let i = steps; i >= 0; i--) {
+    const o = (e * i) / steps;
+    path(o * EX, o * EY);
+    ctx.fill();
+  }
+}
+
 // ── Internal helpers ─────────────────────────────────────────────────
 
-function drawFace(ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number, cheekColor?: string): void {
+function drawFace(ctx: CanvasRenderingContext2D, cx: number, cy: number, scale: number, cheekColor?: string, blink = 0): void {
   const e = 2.2 * scale;
-  ctx.fillStyle = INK;
-  ctx.beginPath(); ctx.arc(cx - 6 * scale, cy, e, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(cx + 6 * scale, cy, e, 0, Math.PI * 2); ctx.fill();
-  ctx.fillStyle = '#ffffff';
-  ctx.beginPath(); ctx.arc(cx - 6 * scale + 0.8 * scale, cy - 0.8 * scale, 0.8 * scale, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(cx + 6 * scale + 0.8 * scale, cy - 0.8 * scale, 0.8 * scale, 0, Math.PI * 2); ctx.fill();
+  if (blink > 0.5) {
+    // happy closed eyes: two little "∩" arcs
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 1.8 * scale;
+    ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.arc(cx - 6 * scale, cy + 0.6 * scale, 2.6 * scale, Math.PI, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx + 6 * scale, cy + 0.6 * scale, 2.6 * scale, Math.PI, Math.PI * 2); ctx.stroke();
+  } else {
+    ctx.fillStyle = INK;
+    ctx.beginPath(); ctx.arc(cx - 6 * scale, cy, e, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 6 * scale, cy, e, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(cx - 6 * scale + 0.8 * scale, cy - 0.8 * scale, 0.8 * scale, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(cx + 6 * scale + 0.8 * scale, cy - 0.8 * scale, 0.8 * scale, 0, Math.PI * 2); ctx.fill();
+  }
   ctx.strokeStyle = INK;
   ctx.lineWidth = 1.8 * scale;
   ctx.lineCap = 'round';
@@ -185,13 +226,15 @@ export function drawBackground(ctx: CanvasRenderingContext2D, W: number, H: numb
   ctx.globalAlpha = 1;
 }
 
-export function drawBrick(ctx: CanvasRenderingContext2D, b: Brick, t: number): void {
+export function drawBrick(ctx: CanvasRenderingContext2D, b: Brick, t: number, depth = 0): void {
   const { x, y, w, h } = b;
   const col = RB[b.color];
+  const e = depth * Math.min(w, h) * 0.25;
 
   if (b.kind === 'heart') {
     const cx = x + w / 2, cy = y + h / 2;
     const s = Math.min(w, h) * 1.15;
+    extrudePath(ctx, (ox, oy) => heartPath(ctx, cx + ox, cy + oy, s), e, col.shade);
     ctx.lineJoin = 'round';
     ctx.lineWidth = 5;
     ctx.strokeStyle = INK;
@@ -207,6 +250,7 @@ export function drawBrick(ctx: CanvasRenderingContext2D, b: Brick, t: number): v
   if (b.kind === 'sprite') {
     const cx = x + w / 2, cy = y + h / 2;
     const r = Math.min(w, h) * 0.46;
+    extrudePath(ctx, (ox, oy) => starPath(ctx, cx + ox, cy + oy, r * 1.32, r * 0.92, 8, t * 0.6), e, col.shade);
     ctx.fillStyle = col.fill;
     ctx.strokeStyle = INK; ctx.lineWidth = 4; ctx.lineJoin = 'round';
     starPath(ctx, cx, cy, r * 1.32, r * 0.92, 8, t * 0.6);
@@ -220,6 +264,7 @@ export function drawBrick(ctx: CanvasRenderingContext2D, b: Brick, t: number): v
   }
 
   // normal / strong rounded brick
+  extrudePath(ctx, (ox, oy) => roundRect(ctx, x + 2.5 + ox, y + 2.5 + oy, w - 5, h - 5, 12), e, col.shade);
   ctx.lineJoin = 'round';
   ctx.lineWidth = 5;
   ctx.strokeStyle = INK;
@@ -249,11 +294,14 @@ export function drawBrick(ctx: CanvasRenderingContext2D, b: Brick, t: number): v
   }
 }
 
-export function drawPaddle(ctx: CanvasRenderingContext2D, p: Paddle, _t: number): void {
+export function drawPaddle(ctx: CanvasRenderingContext2D, p: Paddle, _t: number, depth = 0): void {
   const { x, y, w, h } = p;
+  const e = depth * h * 0.36;
   ctx.save();
   ctx.fillStyle = 'rgba(52,33,90,0.18)';
-  roundRect(ctx, x + 4, y + 8, w, h, h / 2); ctx.fill();
+  roundRect(ctx, x + 4 + e * 0.2, y + 8 + e * 0.25, w, h, h / 2); ctx.fill();
+
+  extrudePath(ctx, (ox, oy) => roundRect(ctx, x + ox, y + oy, w, h, h / 2), e, '#5b4292');
 
   ctx.lineJoin = 'round';
   ctx.strokeStyle = INK; ctx.lineWidth = 5;
@@ -284,8 +332,9 @@ export function drawPaddle(ctx: CanvasRenderingContext2D, p: Paddle, _t: number)
   ctx.restore();
 }
 
-export function drawBall(ctx: CanvasRenderingContext2D, ball: Ball, t: number): void {
+export function drawBall(ctx: CanvasRenderingContext2D, ball: Ball, t: number, depth = 0): void {
   const { x, y, r } = ball;
+  const d = Math.max(0, Math.min(1, depth)) * 0.62;
   ctx.save();
   const glow = ctx.createRadialGradient(x, y, 1, x, y, r * 2.4);
   glow.addColorStop(0, 'rgba(255,248,180,0.9)');
@@ -293,14 +342,29 @@ export function drawBall(ctx: CanvasRenderingContext2D, ball: Ball, t: number): 
   ctx.fillStyle = glow;
   ctx.beginPath(); ctx.arc(x, y, r * 2.4, 0, Math.PI * 2); ctx.fill();
 
+  // sphere fades in beneath the star; the star shrinks into a sticker on it
+  if (d > 0.02) {
+    const R = r * 1.5;
+    const sph = ctx.createRadialGradient(x - R * 0.4, y - R * 0.45, R * 0.15, x, y, R * 1.05);
+    sph.addColorStop(0, '#fff6c9');
+    sph.addColorStop(0.55, '#ffd93b');
+    sph.addColorStop(1, '#dfa400');
+    ctx.globalAlpha = Math.min(1, d * 1.7);
+    ctx.strokeStyle = INK; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2);
+    ctx.fillStyle = sph; ctx.fill(); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   const rot = t * 1.5;
+  const so = r * (1.5 - 0.32 * d), si = r * (0.66 - 0.16 * d);
   ctx.lineJoin = 'round';
   ctx.strokeStyle = INK; ctx.lineWidth = 4;
-  starPath(ctx, x, y, r * 1.5, r * 0.66, 5, rot); ctx.stroke();
+  starPath(ctx, x, y, so, si, 5, rot); ctx.stroke();
   ctx.fillStyle = '#ffd93b';
-  starPath(ctx, x, y, r * 1.5, r * 0.66, 5, rot); ctx.fill();
+  starPath(ctx, x, y, so, si, 5, rot); ctx.fill();
   ctx.fillStyle = '#fff3a8';
-  starPath(ctx, x, y, r * 0.9, r * 0.4, 5, rot); ctx.fill();
+  starPath(ctx, x, y, r * (0.9 - 0.2 * d), r * (0.4 - 0.09 * d), 5, rot); ctx.fill();
 
   ctx.fillStyle = INK;
   ctx.beginPath(); ctx.arc(x - r * 0.32, y - r * 0.05, r * 0.16, 0, Math.PI * 2); ctx.fill();
@@ -314,7 +378,7 @@ export const PU_ICON: Record<string, string> = {
   multi: '◈', wide: '↔', slow: '🐌', life: '♥', sticky: '✦',
 };
 
-export function drawPowerup(ctx: CanvasRenderingContext2D, pu: PowerUp, t: number): void {
+export function drawPowerup(ctx: CanvasRenderingContext2D, pu: PowerUp, t: number, depth = 0): void {
   const { x, y } = pu;
   const col = RB[pu.color];
   const r = 22;
@@ -322,6 +386,12 @@ export function drawPowerup(ctx: CanvasRenderingContext2D, pu: PowerUp, t: numbe
   ctx.translate(x, y);
   const bob = Math.sin(t * 4 + pu.ph) * 2;
   ctx.translate(0, bob);
+  const e = depth * 5.5;
+  if (pu.type === 'life') {
+    extrudePath(ctx, (ox, oy) => heartPath(ctx, ox, oy, r * 2.0), e, col.shade);
+  } else {
+    extrudePath(ctx, (ox, oy) => { ctx.beginPath(); ctx.arc(ox, oy, r, 0, Math.PI * 2); }, e, col.shade);
+  }
   ctx.lineJoin = 'round'; ctx.lineWidth = 4; ctx.strokeStyle = INK;
   if (pu.type === 'life') {
     heartPath(ctx, 0, 0, r * 2.0); ctx.stroke();
@@ -339,6 +409,87 @@ export function drawPowerup(ctx: CanvasRenderingContext2D, pu: PowerUp, t: numbe
   ctx.lineWidth = 4; ctx.strokeStyle = INK;
   ctx.strokeText(pu.label, 0, 2);
   ctx.fillText(pu.label, 0, 2);
+  ctx.restore();
+}
+
+// ── Brickle creature ─────────────────────────────────────────────────
+// A woken brick: same body as a brick front face, plus stubby limbs and a
+// face. `limb`/`face` animate the wake-up; `walk` drives the waddle cycle.
+
+export interface BrickleState {
+  x: number; y: number;      // body centre
+  w: number; h: number;      // body size (use the brick's front-face size)
+  color: ColorName;
+  face: number;              // 0 → 1 face fade-in
+  limb: number;              // 0 → 1 limb extension
+  walk: number;              // walk-cycle phase (radians)
+  moving: boolean;
+  blink: number;             // 0 open → 1 closed
+  wave: number;              // 0 → 1 right-arm wave
+  squash: number;            // 1 neutral, <1 landing squash
+}
+
+export function drawBrickle(ctx: CanvasRenderingContext2D, s: BrickleState, t: number): void {
+  const col = RB[s.color];
+  const bw = s.w, bh = s.h;
+  const e = Math.min(bw, bh) * 0.22; // always fully 3D — it's alive
+  const lw = bw * 0.15;              // limb thickness
+  const leg = s.limb * bh * 0.42;
+  const arm = s.limb * bw * 0.26;
+
+  ctx.save();
+  ctx.translate(s.x, s.y);
+  const sy = s.squash, sx = 1 / Math.max(0.7, sy);
+  ctx.scale(sx, sy);
+  ctx.rotate(s.moving ? Math.sin(s.walk) * 0.055 : Math.sin(t * 2.2) * 0.02);
+  ctx.lineJoin = 'round';
+
+  // legs — capsules from the body bottom; each lifts on its half of the cycle
+  if (leg > 1) {
+    const liftL = s.moving ? Math.max(0, Math.sin(s.walk)) * leg * 0.6 : 0;
+    const liftR = s.moving ? Math.max(0, -Math.sin(s.walk)) * leg * 0.6 : 0;
+    ([[-bw * 0.24, liftL], [bw * 0.24, liftR]] as [number, number][]).forEach(([fx, lift]) => {
+      ctx.strokeStyle = INK; ctx.lineWidth = 4;
+      ctx.fillStyle = col.fill;
+      roundRect(ctx, fx - lw / 2, bh * 0.5 - 6, lw, 6 + leg - lift, lw / 2);
+      ctx.fill(); ctx.stroke();
+    });
+  }
+
+  // arms — left hangs (swings when walking), right can wave hello
+  if (arm > 1) {
+    const drawArm = (side: -1 | 1, ang: number) => {
+      ctx.save();
+      ctx.translate(side * bw * 0.47, -bh * 0.02);
+      ctx.rotate(ang);
+      ctx.strokeStyle = INK; ctx.lineWidth = 4;
+      ctx.fillStyle = col.fill;
+      roundRect(ctx, 0, -lw / 2, arm, lw, lw / 2);
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+    };
+    const swing = s.moving ? Math.sin(s.walk) * 0.35 : Math.sin(t * 2.2) * 0.08;
+    drawArm(-1, Math.PI - 1.1 + swing);
+    const waveAng = -1.15 - Math.sin(t * 11) * 0.4 * s.wave;
+    drawArm(1, s.wave > 0.05 ? 1.1 + (waveAng - 1.1) * s.wave : 1.1 - swing);
+  }
+
+  // body — extruded brick with the usual highlight band
+  extrudePath(ctx, (ox, oy) => roundRect(ctx, -bw / 2 + ox, -bh / 2 + oy, bw, bh, 14), e, col.shade);
+  ctx.strokeStyle = INK; ctx.lineWidth = 5;
+  roundRect(ctx, -bw / 2, -bh / 2, bw, bh, 14); ctx.stroke();
+  ctx.fillStyle = col.fill;
+  roundRect(ctx, -bw / 2, -bh / 2, bw, bh, 14); ctx.fill();
+  ctx.fillStyle = col.light; ctx.globalAlpha = 0.85;
+  roundRect(ctx, -bw / 2 + 6, -bh / 2 + 5, bw - 12, bh * 0.32, 8); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // face
+  if (s.face > 0.02) {
+    ctx.globalAlpha = s.face;
+    drawFace(ctx, 0, bh * 0.06, Math.min(bw, bh) / 24, col.light, s.blink);
+    ctx.globalAlpha = 1;
+  }
   ctx.restore();
 }
 

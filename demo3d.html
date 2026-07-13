@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Brickles — Depth Lab</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧊</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --ink: #34215a; --ink-dk: #1d1336; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    min-height: 100%;
+    background:
+      radial-gradient(120% 90% at 50% 0%, #8f7bd6 0%, #6a4fa3 55%, #4d3580 100%);
+    font-family: 'Fredoka', system-ui, sans-serif;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 26px 16px 40px;
+  }
+  h1 {
+    color: #fff; font-weight: 700; font-size: 40px; letter-spacing: -0.5px;
+    text-shadow: 0 4px 0 rgba(29,19,54,0.5);
+    margin-bottom: 4px;
+  }
+  h1 .cube { display: inline-block; transform: rotate(-6deg); }
+  p.sub { color: #cdbff0; font-weight: 500; font-size: 19px; margin-bottom: 20px; }
+  #frame {
+    border-radius: 30px; overflow: hidden;
+    box-shadow: 0 24px 60px rgba(40,20,70,0.55), 0 0 0 7px rgba(255,255,255,0.18);
+    line-height: 0;
+  }
+  canvas#lab { width: min(92vw, 760px); height: auto; }
+  #bar {
+    margin-top: 26px;
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap; justify-content: center;
+    background: #fffdf7; border: 6px solid var(--ink); border-radius: 999px;
+    padding: 14px 28px;
+    box-shadow: 0 8px 0 rgba(29,19,54,0.45);
+  }
+  #replay, #wake {
+    font-family: inherit; font-weight: 700; font-size: 22px; color: #fff;
+    background: linear-gradient(180deg,#ff8fcb,#ff5fae);
+    border: 5px solid var(--ink); border-radius: 999px;
+    padding: 10px 26px; cursor: pointer;
+    box-shadow: 0 5px 0 rgba(52,33,90,0.35);
+    transition: transform .08s, box-shadow .08s;
+  }
+  #wake { background: linear-gradient(180deg,#ffe06b,#ffc83b); color: var(--ink); }
+  #replay:active, #wake:active { transform: translateY(3px); box-shadow: 0 2px 0 rgba(52,33,90,0.35); }
+  label { display: flex; align-items: center; gap: 12px; color: var(--ink); font-weight: 600; font-size: 20px; }
+  input[type=range] { width: 240px; accent-color: #ff5fae; }
+  #pct { min-width: 100px; text-align: left; color: #ff5fae; font-weight: 700; }
+</style>
+</head>
+<body>
+  <h1><span class="cube">🧊</span> Brickles Depth Lab</h1>
+  <p class="sub">flat → 3D pop sequence · every element · scrub to inspect</p>
+  <div id="frame"><canvas id="lab"></canvas></div>
+  <div id="bar">
+    <button id="replay">▶ Replay sequence</button>
+    <button id="wake">✦ Wake a brickle</button>
+    <label>Depth <input type="range" id="depth" min="0" max="100" value="0" /> <span id="pct">0%</span></label>
+  </div>
+  <script type="module" src="/src/demo3d.ts"></script>
+</body>
+</html>
