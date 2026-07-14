@@ -2,8 +2,9 @@ import { RB, INK, LEVELS, WORLDS, brickFromChar, type ColorName } from './levels
 import { Sound } from './audio.ts';
 import {
   drawBackground, drawBrick, drawPaddle, drawBall,
-  drawPowerup, drawParticle, drawHUD,
+  drawPowerup, drawParticle, drawHUD, drawBrickle, easeOutBack,
   type Brick, type Ball, type Paddle, type PowerUp, type Particle, type Floater, type Cloud, type Twinkle, type Effects,
+  type BrickleState,
 } from './render.ts';
 
 const W = 1080, H = 1320;
@@ -75,7 +76,7 @@ let score = 0;
 let levelStartScore = 0;
 let lives = 5;
 let combo = 0, comboTimer = 0, bestCombo = 0;
-let bricks: Brick[] = [], balls: Ball[] = [], powerups: PowerUp[] = [];
+let bricks: DepthBrick[] = [], balls: Ball[] = [], powerups: PowerUp[] = [];
 let particles: Particle[] = [], floaters: Floater[] = [];
 let initialBrickCount = 0;
 let paddle: Paddle = { x: W / 2 - 110, y: H - 140, w: 220, h: 30, baseW: 220 };
@@ -104,11 +105,139 @@ function grayscaleAmount(): number {
   return Math.max(0, (totalInWorld - posInWorld - brickFraction) / totalInWorld);
 }
 
+// ── World 4: depth + brickles ─────────────────────────────────────────
+// Depth mirrors Chromatica's grayscale: progress through World 4 plus the
+// fraction of bricks cleared in the current level → 0..1. Chromatica drives
+// a CSS filter; depth instead feeds the draw calls. Individual bricks pop
+// to full 3D (easeOutBack, staggered) as the rising level crosses their
+// scattered thresholds, so volume spreads through the wall brick by brick.
+
+const WAKE_FROM = 3;          // world-4 level index where bricks wake instead of break
+const POP_S = 0.62;           // per-brick inflate duration (s)
+const GROUND_Y = H - 48;      // spectator row, below the paddle line
+const CROWD_SCALE = 0.62;     // spectators shrink — reads as distance
+const CROWD_MAX = 36;
+
+interface DepthBrick extends Brick { th: number; popT: number; popped: boolean }
+
+let popCursor = 0;            // schedules the stagger between brick pops
+let depthSmooth = 0;          // eased world depth for paddle / ball / powerups
+
+function depthAmount(): number {
+  if (state === 'title' || state === 'levelselect' || state === 'win') return 0;
+  if (currentWorld().id !== 4) return 0;
+  const posInWorld = worldLevelIndex();
+  const totalInWorld = LEVELS.filter(l => l.world === 4).length;
+  const bricksCleared = Math.max(0, initialBrickCount - bricks.length);
+  const brickFraction = initialBrickCount > 0 ? bricksCleared / initialBrickCount : 0;
+  return Math.min(1, (posInWorld + brickFraction) / totalInWorld);
+}
+
+function isWakeLevel(): boolean {
+  return currentWorld().id === 4 && worldLevelIndex() >= WAKE_FROM;
+}
+
+function brickDepth(b: DepthBrick): number {
+  if (b.popT < 0 || t < b.popT) return 0;
+  return easeOutBack(Math.min(1, (t - b.popT) / POP_S));
+}
+
+interface BrickleEnt {
+  s: BrickleState;
+  born: number;                 // t (s) when woken
+  homeX: number; homeY: number;
+  fullW: number; fullH: number;
+  hopToX: number;
+  dir: number;
+  nextBlink: number; blinkUntil: number;
+  nextWave: number; waveUntil: number;
+  phase: 'wobble' | 'wake' | 'hop' | 'wander';
+}
+
+let brickles: BrickleEnt[] = [];
+let freedThisRun = 0;
+
+function wakeBrick(br: Brick): void {
+  if (brickles.length >= CROWD_MAX) brickles.shift();
+  brickles.push({
+    s: {
+      x: br.x + br.w / 2, y: br.y + br.h / 2,
+      w: br.w - 5, h: br.h - 5,
+      color: br.color, kind: br.kind,
+      face: 0, limb: 0, walk: 0,
+      moving: false, blink: 0, wave: 0, squash: 1,
+    },
+    born: t,
+    homeX: br.x + br.w / 2, homeY: br.y + br.h / 2,
+    fullW: br.w - 5, fullH: br.h - 5,
+    hopToX: Math.max(W * 0.14, Math.min(W * 0.86, br.x + br.w / 2 + (Math.random() - 0.5) * 300)),
+    dir: Math.random() < 0.5 ? -1 : 1,
+    nextBlink: t + 2.5, blinkUntil: 0,
+    nextWave: t + 3.2 + Math.random() * 2, waveUntil: 0,
+    phase: 'wobble',
+  });
+  freedThisRun++;
+  progress.freed++;
+  saveProgress();
+}
+
+function updateBrickleEnt(b: BrickleEnt, dt: number): void {
+  const s = b.s;
+  const age = t - b.born;
+  if (b.phase === 'wobble') {
+    s.x = b.homeX + Math.sin(t * 45) * 3.5;
+    if (age > 0.52) { b.phase = 'wake'; s.x = b.homeX; }
+  } else if (b.phase === 'wake') {
+    const k = Math.min(1, (age - 0.52) / 0.9);
+    s.face = Math.min(1, k * 1.7);
+    s.blink = k < 0.16 ? 1 : 0;          // eyes open with a first blink
+    s.limb = k < 0.3 ? 0 : easeOutBack((k - 0.3) / 0.7);
+    if (k >= 1) b.phase = 'hop';
+  } else if (b.phase === 'hop') {
+    const k = Math.min(1, (age - 1.42) / 0.72);
+    s.x = b.homeX + (b.hopToX - b.homeX) * k;
+    s.y = b.homeY + (GROUND_Y - b.homeY) * k - Math.sin(k * Math.PI) * 170;
+    const sc = 1 - (1 - CROWD_SCALE) * k;
+    s.w = b.fullW * sc; s.h = b.fullH * sc;
+    if (k >= 1) {
+      b.phase = 'wander';
+      s.squash = 0.72;
+      burst(s.x, s.y + s.h / 2, s.color);
+    }
+  } else {
+    // wander the spectator row, blinking, waving, cheering
+    s.squash += (1 - s.squash) * Math.min(1, dt * 10);
+    const waving = t < b.waveUntil;
+    s.moving = !waving;
+    if (s.moving) {
+      s.x += b.dir * 62 * dt;
+      if (s.x < W * 0.12) { s.x = W * 0.12; b.dir = 1; }
+      if (s.x > W * 0.88) { s.x = W * 0.88; b.dir = -1; }
+      s.walk += dt * 9;
+      s.y = GROUND_Y - Math.abs(Math.sin(s.walk)) * 4;
+    } else {
+      s.y = GROUND_Y - Math.abs(Math.sin(t * 9)) * 7; // excited little jumps
+    }
+    if (t > b.nextWave) {
+      b.waveUntil = t + 1.2;
+      b.nextWave = t + 4.8 + Math.random() * 3.2;
+      if (Math.random() < 0.4) b.dir *= -1;
+    }
+    s.wave += ((waving ? 1 : 0) - s.wave) * Math.min(1, dt * 8);
+    if (t > b.nextBlink) {
+      b.blinkUntil = t + 0.14;
+      b.nextBlink = t + 2.2 + Math.random() * 2;
+    }
+    s.blink = t < b.blinkUntil || waving ? 1 : 0;
+  }
+}
+
 // ── Progress (unlocks + per-level bests) ──────────────────────────────
 
 interface Progress {
   maxUnlocked: number;          // 0-based, highest playable level index
   best: Record<number, number>; // level index → best score for that level
+  freed: number;                // lifetime brickles woken (roster meta for the next act)
 }
 
 const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
@@ -118,10 +247,10 @@ function loadProgress(): Progress {
     const p = JSON.parse(localStorage.getItem('brickles_progress') ?? '');
     if (typeof p?.maxUnlocked === 'number' && p.best && typeof p.best === 'object') {
       const maxUnlocked = IS_LOCAL ? LEVELS.length - 1 : Math.min(p.maxUnlocked, LEVELS.length - 1);
-      return { maxUnlocked, best: p.best };
+      return { maxUnlocked, best: p.best, freed: typeof p.freed === 'number' ? p.freed : 0 };
     }
   } catch { /* fall through to fresh progress */ }
-  return { maxUnlocked: IS_LOCAL ? LEVELS.length - 1 : 0, best: {} };
+  return { maxUnlocked: IS_LOCAL ? LEVELS.length - 1 : 0, best: {}, freed: 0 };
 }
 
 const progress: Progress = loadProgress();
@@ -154,16 +283,21 @@ function buildLevel(i: number): void {
         w: bw, h: bh,
         color: def.color, hits: def.hits, maxHits: def.hits,
         kind: def.kind, drop: !!def.drop,
+        // golden-ratio scatter spreads pop thresholds evenly through the wall
+        th: ((bricks.length + 1) * 0.618034) % 1, popT: -1, popped: false,
       });
     }
   });
-  baseSpeed = 510 + i * 35;
+  baseSpeed = Math.min(1000, 510 + i * 35);
   levelStartScore = score;
   paddle.w = paddle.baseW;
   effects = { wide: 0, slow: 0, sticky: 0 };
   speedMul = speedMulTarget = 1;
   powerups = []; particles = [];
   initialBrickCount = bricks.length;
+  popCursor = 0;
+  // the crowd follows you through Poptopia, but disperses elsewhere
+  if (LEVELS[i].world !== 4) brickles = [];
   resetBall();
 }
 
@@ -265,6 +399,8 @@ function breakBrick(idx: number, _ball: Ball): boolean {
   shake = Math.min(shake + 3, 9);
   if (combo >= 3) floatText(br.x + br.w / 2, br.y, '×' + combo, RB[br.color].shade);
   if (br.drop || Math.random() < 0.06) spawnPowerup(br.x + br.w / 2, br.y + br.h / 2);
+  // in the back half of Poptopia the brick was never broken — it was asleep
+  if (isWakeLevel()) { Sound.powerup(); wakeBrick(br); }
   bricks.splice(idx, 1);
   return true;
 }
@@ -292,6 +428,24 @@ function update(dt: number): void {
   paddle.x = Math.max(0, Math.min(W - paddle.w, paddle.x));
 
   if (state !== 'play' && state !== 'serve') return;
+
+  if (currentWorld().id === 4) {
+    const D = depthAmount();
+    depthSmooth += (D - depthSmooth) * Math.min(1, dt * 2.5);
+    for (const b of bricks) {
+      if (b.popT < 0 && b.th <= D) {
+        popCursor = Math.max(popCursor, t) + 0.07; // ripple, not a wall of pops
+        b.popT = popCursor;
+      }
+      if (!b.popped && b.popT >= 0 && t >= b.popT) {
+        b.popped = true;
+        burst(b.x + b.w / 2, b.y + b.h / 2, b.color);
+      }
+    }
+    brickles.forEach(b => updateBrickleEnt(b, dt));
+  } else {
+    depthSmooth = 0;
+  }
 
   for (let i = balls.length - 1; i >= 0; i--) {
     const b = balls[i];
@@ -408,7 +562,8 @@ function endGame(won: boolean): void {
     Sound.win();
     (document.getElementById('win-score') as HTMLElement).textContent = score.toLocaleString();
     (document.getElementById('win-hi')    as HTMLElement).textContent =
-      'Best combo ×' + bestCombo + '  •  ' + clearedCount() + ' / ' + LEVELS.length + ' levels cleared';
+      'Best combo ×' + bestCombo + '  •  ' + clearedCount() + ' / ' + LEVELS.length + ' levels cleared' +
+      (freedThisRun > 0 ? '  •  ' + freedThisRun + ' brickles freed ✦' : '');
     show('overlay-win');
   } else {
     Sound.life();
@@ -423,6 +578,7 @@ function endGame(won: boolean): void {
 function startAt(idx: number): void {
   levelIdx = Math.min(idx, LEVELS.length - 1);
   score = 0; lives = 5; bestCombo = 0; combo = 0;
+  brickles = []; freedThisRun = 0;
   buildLevel(levelIdx);
   state = 'serve';
   hideAll();
@@ -446,8 +602,11 @@ function render(): void {
   if (shake > 0) ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake);
   drawBackground(ctx, W, H, t, clouds, twinkles, currentWorld());
 
-  bricks.forEach(b => drawBrick(ctx, b, t));
-  powerups.forEach(p => drawPowerup(ctx, p, t));
+  // spectators live behind the playfield so they never occlude the action
+  brickles.forEach(b => drawBrickle(ctx, b.s, t));
+
+  bricks.forEach(b => drawBrick(ctx, b, t, brickDepth(b)));
+  powerups.forEach(p => drawPowerup(ctx, p, t, depthSmooth));
   particles.forEach(p => drawParticle(ctx, p));
 
   floaters.forEach(f => {
@@ -461,8 +620,8 @@ function render(): void {
   });
 
   if (state !== 'title') {
-    drawPaddle(ctx, paddle, t);
-    balls.forEach(b => drawBall(ctx, b, t));
+    drawPaddle(ctx, paddle, t, depthSmooth);
+    balls.forEach(b => drawBall(ctx, b, t, depthSmooth));
   }
 
   drawHUD(ctx, W, HUD_H, score, lives, LEVELS[levelIdx].name, effects, combo, currentWorld());
@@ -671,3 +830,11 @@ function updateTitle(): void {
 updateTitle();
 show('overlay-title');
 requestAnimationFrame(loop);
+
+// dev-only hook so depth/wake behaviour can be exercised without rallying
+if (IS_LOCAL) {
+  (window as unknown as Record<string, unknown>).bricklesDebug = {
+    hit: (n = 1) => { for (let k = 0; k < n && bricks.length; k++) breakBrick(bricks.length - 1, balls[0]); },
+    depth: () => depthAmount(),
+  };
+}

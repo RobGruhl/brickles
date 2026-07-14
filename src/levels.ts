@@ -41,6 +41,9 @@ export const WORLDS: World[] = [
   { id: 3, name: 'Chromatica', mood: 'greyscale-to-rainbow',
     sky: ['#6A1B9A', '#E91E63', '#FFD600'], night: false,
     cloudFill: 'rgba(255,200,150,0.88)', accent: '#E91E63', twinkles: 28 },
+  { id: 4, name: 'Poptopia', mood: 'flat-to-3D',
+    sky: ['#155e75', '#2fb1a9', '#c8f7e2'], night: false,
+    cloudFill: 'rgba(255,255,255,0.88)', accent: '#3fd0d6', twinkles: 30 },
 ];
 
 export const RB: Record<ColorName, ColorEntry> = {
@@ -269,6 +272,73 @@ export const LEVELS: Level[] = [
       'bbbbbbbbbbbb',
       'uuuuuuuuuuuu',
       'pSpSpSpSpSpS',
+    ],
+  },
+  // ── World 4: Poptopia — the flat world pops into 3D, then wakes up ──
+  // Depth spreads brick-by-brick as you play (see depthAmount in game.ts);
+  // from "Something Stirs" on, bricks wake into brickles instead of breaking.
+  {
+    name: 'Paper Thin',
+    world: 4,
+    // flat stripes — the calm before anything has volume
+    grid: [
+      '############',
+      '............',
+      '.####..####.',
+      '............',
+      '############',
+    ],
+  },
+  {
+    name: 'Pop-Up Book',
+    world: 4,
+    // a little castle that unfolds page by page
+    grid: [
+      '..##....##..',
+      '.####..####.',
+      '############',
+      '##S######S##',
+      '############',
+      '....#HH#....',
+    ],
+  },
+  {
+    name: 'Deep End',
+    world: 4,
+    // chunky armoured diamond — the wall at its most solid, fully extruded
+    grid: [
+      '....2222....',
+      '..22####22..',
+      '.2###SS###2.',
+      '22##H##H##22',
+      '.2########2.',
+      '..22####22..',
+    ],
+  },
+  {
+    name: 'Something Stirs',
+    world: 4,
+    // sparse checker — room to watch the first sleepers wake and hop down
+    grid: [
+      '#.#.#.#.#.#.',
+      '.#.#.#.#.#.#',
+      '#.S.#.#.S.#.',
+      '.#.#.#.#.#.#',
+      '#.#.H..H.#.#',
+      '.#.#.#.#.#.#',
+    ],
+  },
+  {
+    name: 'Wide Awake',
+    world: 4,
+    // the grand finale — every brick is a sleeping brickle
+    grid: [
+      'S##########S',
+      '############',
+      '##H##HH##H##',
+      '############',
+      '2#S######S#2',
+      '############',
     ],
   },
 ];

@@ -98,6 +98,11 @@ export function heartPath(ctx: CanvasRenderingContext2D, cx: number, cy: number,
 
 const EX = 0.5, EY = 0.87; // extrusion direction (unit-ish vector)
 
+export function easeOutBack(k: number): number {
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(k - 1, 3) + c1 * Math.pow(k - 1, 2);
+}
+
 export function extrudePath(
   ctx: CanvasRenderingContext2D,
   path: (ox: number, oy: number) => void,
@@ -299,7 +304,7 @@ export function drawPaddle(ctx: CanvasRenderingContext2D, p: Paddle, _t: number,
   const e = depth * h * 0.36;
   ctx.save();
   ctx.fillStyle = 'rgba(52,33,90,0.18)';
-  roundRect(ctx, x + 4 + e * 0.2, y + 8 + e * 0.25, w, h, h / 2); ctx.fill();
+  roundRect(ctx, x + 4 + e * 0.45, y + 8 + e * 0.55, w + e * 0.3, h, h / 2); ctx.fill();
 
   extrudePath(ctx, (ox, oy) => roundRect(ctx, x + ox, y + oy, w, h, h / 2), e, '#5b4292');
 
@@ -420,6 +425,7 @@ export interface BrickleState {
   x: number; y: number;      // body centre
   w: number; h: number;      // body size (use the brick's front-face size)
   color: ColorName;
+  kind?: BrickKind;          // heart/sprite brickles keep their body shape
   face: number;              // 0 → 1 face fade-in
   limb: number;              // 0 → 1 limb extension
   walk: number;              // walk-cycle phase (radians)
@@ -432,10 +438,20 @@ export interface BrickleState {
 export function drawBrickle(ctx: CanvasRenderingContext2D, s: BrickleState, t: number): void {
   const col = RB[s.color];
   const bw = s.w, bh = s.h;
-  const e = Math.min(bw, bh) * 0.22; // always fully 3D — it's alive
+  const kind = s.kind === 'heart' || s.kind === 'sprite' ? s.kind : 'normal';
+  const m = Math.min(bw, bh);
+  const e = m * 0.22;                // always fully 3D — it's alive
   const lw = bw * 0.15;              // limb thickness
   const leg = s.limb * bh * 0.42;
   const arm = s.limb * bw * 0.26;
+
+  // per-kind body geometry: where the feet hang and the arms attach
+  const hs = m * 1.15;               // heart size (matches drawBrick)
+  const rOut = m * 0.66;             // sprite star outer radius
+  const bodyBottom = kind === 'heart' ? hs * 0.42 : kind === 'sprite' ? rOut * 0.88 : bh / 2;
+  const legX = kind === 'heart' ? bw * 0.14 : kind === 'sprite' ? rOut * 0.42 : bw * 0.24;
+  const armX = kind === 'heart' ? hs * 0.48 : kind === 'sprite' ? rOut * 0.78 : bw * 0.47;
+  const armY = kind === 'heart' ? -hs * 0.1 : kind === 'sprite' ? 0 : -bh * 0.02;
 
   ctx.save();
   ctx.translate(s.x, s.y);
@@ -448,10 +464,11 @@ export function drawBrickle(ctx: CanvasRenderingContext2D, s: BrickleState, t: n
   if (leg > 1) {
     const liftL = s.moving ? Math.max(0, Math.sin(s.walk)) * leg * 0.6 : 0;
     const liftR = s.moving ? Math.max(0, -Math.sin(s.walk)) * leg * 0.6 : 0;
-    ([[-bw * 0.24, liftL], [bw * 0.24, liftR]] as [number, number][]).forEach(([fx, lift]) => {
+    const topY = kind === 'normal' ? bh * 0.5 - 6 : bodyBottom * 0.35;
+    ([[-legX, liftL], [legX, liftR]] as [number, number][]).forEach(([fx, lift]) => {
       ctx.strokeStyle = INK; ctx.lineWidth = 4;
       ctx.fillStyle = col.fill;
-      roundRect(ctx, fx - lw / 2, bh * 0.5 - 6, lw, 6 + leg - lift, lw / 2);
+      roundRect(ctx, fx - lw / 2, topY, lw, bodyBottom + leg - lift - topY, lw / 2);
       ctx.fill(); ctx.stroke();
     });
   }
@@ -460,7 +477,7 @@ export function drawBrickle(ctx: CanvasRenderingContext2D, s: BrickleState, t: n
   if (arm > 1) {
     const drawArm = (side: -1 | 1, ang: number) => {
       ctx.save();
-      ctx.translate(side * bw * 0.47, -bh * 0.02);
+      ctx.translate(side * armX, armY);
       ctx.rotate(ang);
       ctx.strokeStyle = INK; ctx.lineWidth = 4;
       ctx.fillStyle = col.fill;
@@ -474,20 +491,42 @@ export function drawBrickle(ctx: CanvasRenderingContext2D, s: BrickleState, t: n
     drawArm(1, s.wave > 0.05 ? 1.1 + (waveAng - 1.1) * s.wave : 1.1 - swing);
   }
 
-  // body — extruded brick with the usual highlight band
-  extrudePath(ctx, (ox, oy) => roundRect(ctx, -bw / 2 + ox, -bh / 2 + oy, bw, bh, 14), e, col.shade);
-  ctx.strokeStyle = INK; ctx.lineWidth = 5;
-  roundRect(ctx, -bw / 2, -bh / 2, bw, bh, 14); ctx.stroke();
-  ctx.fillStyle = col.fill;
-  roundRect(ctx, -bw / 2, -bh / 2, bw, bh, 14); ctx.fill();
-  ctx.fillStyle = col.light; ctx.globalAlpha = 0.85;
-  roundRect(ctx, -bw / 2 + 6, -bh / 2 + 5, bw - 12, bh * 0.32, 8); ctx.fill();
-  ctx.globalAlpha = 1;
+  // body — extruded, keeping the brick's original shape
+  if (kind === 'heart') {
+    extrudePath(ctx, (ox, oy) => heartPath(ctx, ox, oy, hs), e, col.shade);
+    ctx.strokeStyle = INK; ctx.lineWidth = 5;
+    heartPath(ctx, 0, 0, hs); ctx.stroke();
+    ctx.fillStyle = col.fill; heartPath(ctx, 0, 0, hs); ctx.fill();
+    ctx.fillStyle = col.light; ctx.globalAlpha = 0.6;
+    ctx.beginPath(); ctx.ellipse(-hs * 0.16, -hs * 0.12, hs * 0.12, hs * 0.08, -0.5, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+  } else if (kind === 'sprite') {
+    extrudePath(ctx, (ox, oy) => starPath(ctx, ox, oy, rOut, rOut * 0.7, 8, 0), e, col.shade);
+    ctx.strokeStyle = INK; ctx.lineWidth = 4;
+    starPath(ctx, 0, 0, rOut, rOut * 0.7, 8, 0); ctx.stroke();
+    ctx.fillStyle = col.fill;
+    starPath(ctx, 0, 0, rOut, rOut * 0.7, 8, 0); ctx.fill();
+    ctx.fillStyle = '#fff7fb';
+    ctx.beginPath(); ctx.arc(0, 0, rOut * 0.62, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = INK; ctx.lineWidth = 3.5;
+    ctx.beginPath(); ctx.arc(0, 0, rOut * 0.62, 0, Math.PI * 2); ctx.stroke();
+  } else {
+    extrudePath(ctx, (ox, oy) => roundRect(ctx, -bw / 2 + ox, -bh / 2 + oy, bw, bh, 14), e, col.shade);
+    ctx.strokeStyle = INK; ctx.lineWidth = 5;
+    roundRect(ctx, -bw / 2, -bh / 2, bw, bh, 14); ctx.stroke();
+    ctx.fillStyle = col.fill;
+    roundRect(ctx, -bw / 2, -bh / 2, bw, bh, 14); ctx.fill();
+    ctx.fillStyle = col.light; ctx.globalAlpha = 0.85;
+    roundRect(ctx, -bw / 2 + 6, -bh / 2 + 5, bw - 12, bh * 0.32, 8); ctx.fill();
+    ctx.globalAlpha = 1;
+  }
 
   // face
   if (s.face > 0.02) {
     ctx.globalAlpha = s.face;
-    drawFace(ctx, 0, bh * 0.06, Math.min(bw, bh) / 24, col.light, s.blink);
+    if (kind === 'heart')       drawFace(ctx, 0, hs * 0.04, m / 26, col.light, s.blink);
+    else if (kind === 'sprite') drawFace(ctx, 0, 0, m / 24, col.fill, s.blink);
+    else                        drawFace(ctx, 0, bh * 0.06, m / 24, col.light, s.blink);
     ctx.globalAlpha = 1;
   }
   ctx.restore();

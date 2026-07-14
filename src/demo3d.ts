@@ -180,7 +180,7 @@ function wake(i: number): void {
     s: {
       x: b.x + b.w / 2, y: b.y + b.h / 2,
       w: b.w - 5, h: b.h - 5,
-      color: b.color,
+      color: b.color, kind: b.kind,
       face: 0, limb: 0, walk: 0,
       moving: false, blink: 0, wave: 0, squash: 1,
     },
