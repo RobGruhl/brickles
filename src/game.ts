@@ -673,7 +673,11 @@ window.addEventListener('mousemove', e => {
   mouseX = Math.max(0, Math.min(W, toStageX(e.clientX)));
 });
 window.addEventListener('touchmove', e => {
-  if (e.touches[0]) { mouseX = Math.max(0, Math.min(W, toStageX(e.touches[0].clientX))); e.preventDefault(); }
+  if (e.touches[0]) {
+    mouseX = Math.max(0, Math.min(W, toStageX(e.touches[0].clientX)));
+    // let the level map scroll on touch; block page scroll everywhere else
+    if (state !== 'levelselect') e.preventDefault();
+  }
 }, { passive: false });
 
 function primaryAction(): void {
